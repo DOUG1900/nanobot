@@ -61,43 +61,6 @@ class WebSearchTool(Tool):
         },
         "required": ["query"]
     }
-<<<<<<< HEAD
-    
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self.api_key = api_key
-        self.max_results = max_results
-
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        api_key = self.api_key or os.environ.get("BRAVE_API_KEY", "")
-        if not api_key:
-            return (
-                "Error: Brave Search API key not configured. "
-                "Set it in ~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
-        
-        try:
-            n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-            
-            results = r.json().get("web", {}).get("results", [])
-            if not results:
-                return f"No results for: {query}"
-            
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
-=======
 
     def __init__(
         self,
@@ -169,7 +132,7 @@ class WebSearchTool(Tool):
         if engine_name not in ("brave", "serpapi", "searchapi"):
             return f"Error: {engine_name} is not supported, please try brave | serpapi | searchapi"
 
-        # 确定结果数量
+        # number of retrieval results
         n = min(max(count or self.max_results, 1), 10)
 
         try:
@@ -179,9 +142,7 @@ class WebSearchTool(Tool):
                 return await self._search_serpapi(query, n)
             elif engine_name == "searchapi":
                 return await self._search_searchapi(query, n)
->>>>>>> 7af7a78 (implement serpapi and searchapi interface for web search)
         except Exception as e:
-            # 这里可以根据需要做更细致的异常处理
             return f"Error: {e}"
 
     async def _search_brave(self, query: str, n: int) -> str:

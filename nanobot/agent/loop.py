@@ -52,13 +52,8 @@ class AgentLoop:
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-<<<<<<< HEAD
-        memory_window: int = 100,
-        brave_api_key: str | None = None,
-=======
         memory_window: int = 50,
         web_search_api_key: str | None = None,
->>>>>>> 7af7a78 (implement serpapi and searchapi interface for web search)
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -116,13 +111,8 @@ class AgentLoop:
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
         ))
-<<<<<<< HEAD
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-=======
-
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.web_search_api_key))
->>>>>>> 7af7a78 (implement serpapi and searchapi interface for web search)
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))

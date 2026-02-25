@@ -4,7 +4,7 @@ import html
 import json
 import os
 import re
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -44,18 +44,24 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
-    
+    """Web search tool, currently supporting Brave | SearchAPI | SerpAPI."""
+
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
+            "engine": {
+                "type": "string",
+                "enum": ["brave", "serpapi", "searchapi"],
+                "description": "Search engine backend: brave, serpapi, or searchapi (default: brave)."
+            },
         },
         "required": ["query"]
     }
+<<<<<<< HEAD
     
     def __init__(self, api_key: str | None = None, max_results: int = 5):
         self.api_key = api_key
@@ -91,8 +97,190 @@ class WebSearchTool(Tool):
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
+=======
+
+    def __init__(
+        self,
+        *,
+        engine: Literal["brave", "serpapi", "searchapi"] = "searchapi",
+        api_key: str | None = None,
+        max_results: int = 5,
+    ):
+        """
+        Parameters
+        ----------
+        engine : "brave" | "serpapi" | "searchapi"
+            Which search backend to use. Default is "brave".
+        api_key : str | None
+            API key for the selected engine. If None, will attempt to read from 
+            the corresponding environment variable based on the engine type.
+        max_results : int
+            Default number of results when `count` is not provided.
+        """
+        self.engine = engine
+        if api_key:
+            self.api_key = api_key
+        else:
+            env_var_map = {
+                    "brave": "BRAVE_API_KEY",
+                    "serpapi": "SERPAPI_API_KEY",
+                    "searchapi": "SEARCHAPI_API_KEY",
+                }
+            env_var_name = env_var_map.get(engine)
+            self.api_key = os.environ.get(env_var_name, "") if env_var_name else ""
+
+        self.max_results = max_results
+
+    async def execute(
+        self,
+        query: str,
+        count: int | None = None,
+        engine: Literal["brave", "serpapi", "searchapi"] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """
+        Execute web search.
+
+        Parameters
+        ----------
+        query : str
+            Search query.
+        count : int | None
+            Number of results (1-10). If None, use `max_results`.
+        engine : "brave" | "serpapi" | "searchapi" | None
+            Override the default engine.
+
+        Returns
+        -------
+        str
+            Human-readable text with titles, URLs, and snippets.
+
+        Raises
+        ------
+        NotImplementedError
+            If `engine` is not one of "brave", "serpapi", or "searchapi".
+        """
+        if not query:
+            return "Error: query is required."
+
+        # allow overwritting
+        engine_name = engine or self.engine
+
+        if engine_name not in ("brave", "serpapi", "searchapi"):
+            return f"Error: {engine_name} is not supported, please try brave | serpapi | searchapi"
+
+        # 确定结果数量
+        n = min(max(count or self.max_results, 1), 10)
+
+        try:
+            if engine_name == "brave":
+                return await self._search_brave(query, n)
+            elif engine_name == "serpapi":
+                return await self._search_serpapi(query, n)
+            elif engine_name == "searchapi":
+                return await self._search_searchapi(query, n)
+>>>>>>> 7af7a78 (implement serpapi and searchapi interface for web search)
         except Exception as e:
+            # 这里可以根据需要做更细致的异常处理
             return f"Error: {e}"
+
+    async def _search_brave(self, query: str, n: int) -> str:
+        """Use Brave Search API to search the web."""
+        if not self.api_key:
+            return "Error: BRAVE_API_KEY not configured."
+
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": n},
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": self.api_key,
+                },
+                timeout=10.0
+            )
+            r.raise_for_status()
+
+        results = r.json().get("web", {}).get("results", [])
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            title = item.get("title", "")
+            url = item.get("url", "")
+            desc = item.get("description", "")
+            lines.append(f"{i}. {title}\n   {url}")
+            if desc:
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
+
+    async def _search_serpapi(self, query: str, n: int) -> str:
+        """Use SerpAPI to search Google."""
+        if not self.api_key:
+            return "Error: SERPAPI_API_KEY not configured."
+
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://serpapi.com/search.json",
+                params={
+                    "q": query,
+                    "api_key": self.api_key,
+                    "hl": "en",
+                    "gl": "us",
+                },
+                headers={"Accept": "application/json"},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+
+        data = r.json()
+        results = data.get("organic_results", [])
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            title = item.get("title", "")
+            link = item.get("link", "")
+            snippet = item.get("snippet", "")
+            lines.append(f"{i}. {title}\n   {link}")
+            if snippet:
+                lines.append(f"   {snippet}")
+        return "\n".join(lines)
+
+    async def _search_searchapi(self, query: str, n: int) -> str:
+        """Use SearchAPI to search Google."""
+        if not self.api_key:
+            return "Error: SEARCHAPI_API_KEY not configured."
+
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://www.searchapi.io/api/v1/search",
+                params={
+                    "engine": "google",
+                    "q": query,
+                    "api_key": self.api_key,
+                },
+                headers={"Accept": "application/json"},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+
+        data = r.json()
+        results = data.get("organic_results", [])
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            title = item.get("title", "")
+            link = item.get("link", "")
+            snippet = item.get("snippet", "")
+            lines.append(f"{i}. {title}\n   {link}")
+            if snippet:
+                lines.append(f"   {snippet}")
+        return "\n".join(lines)
 
 
 class WebFetchTool(Tool):

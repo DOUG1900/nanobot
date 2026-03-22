@@ -42,6 +42,10 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
         async def on_direct_message_create(self, message):
             await channel._on_message(message)
 
+        async def on_at_message_create(self, message):
+            logger.info("Received @ message (group): {}", message)
+            await channel._on_group_message(message)
+
     return _Bot
 
 
@@ -70,7 +74,7 @@ class QQChannel(BaseChannel):
         BotClass = _make_bot_class(self)
         self._client = BotClass()
 
-        logger.info("QQ bot started (C2C private message)")
+        logger.info("QQ bot started (C2C private message + group messages)")
         await self._run_bot()
 
     async def _run_bot(self) -> None:
@@ -99,17 +103,43 @@ class QQChannel(BaseChannel):
         if not self._client:
             logger.warning("QQ client not initialized")
             return
+        
         try:
-            await self._client.api.post_c2c_message(
-                openid=msg.chat_id,
-                msg_type=0,
-                content=msg.content,
-            )
+            # 检查是否是群聊消息（通过metadata判断）
+            metadata = msg.metadata or {}
+            msg_type = metadata.get("type", "private")
+            
+            logger.info("Sending QQ message (type: {}): {}", msg_type, msg.content[:100] + "..." if len(msg.content) > 100 else msg.content)
+            
+            if msg_type == "group":
+                # 发送群聊消息
+                group_id = metadata.get("group_id", msg.chat_id)
+                logger.info("Sending to group: {}", group_id)
+                
+                # 使用post_group_message发送群聊消息
+                result = await self._client.api.post_group_message(
+                    group_openid=group_id,
+                    msg_type=0,  # 0表示文本消息
+                    content=msg.content,
+                )
+                logger.info("Group message sent successfully: {}", result)
+            else:
+                # 发送私聊消息
+                logger.info("Sending to user: {}", msg.chat_id)
+                
+                # 使用post_c2c_message发送私聊消息
+                result = await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=0,  # 0表示文本消息
+                    content=msg.content,
+                )
+                logger.info("Private message sent successfully: {}", result)
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
+            logger.exception("Detailed error:")
 
     async def _on_message(self, data: "C2CMessage") -> None:
-        """Handle incoming message from QQ."""
+        """Handle incoming private message from QQ."""
         try:
             # Dedup by message ID
             if data.id in self._processed_ids:
@@ -126,7 +156,49 @@ class QQChannel(BaseChannel):
                 sender_id=user_id,
                 chat_id=user_id,
                 content=content,
-                metadata={"message_id": data.id},
+                metadata={
+                    "message_id": data.id,
+                    "type": "private",
+                    "sender_id": user_id
+                },
             )
         except Exception:
             logger.exception("Error handling QQ message")
+
+    async def _on_group_message(self, data) -> None:
+        """Handle incoming group message from QQ."""
+        try:
+            # Dedup by message ID
+            if data.id in self._processed_ids:
+                return
+            self._processed_ids.append(data.id)
+
+            author = data.author
+            # 群聊消息中，用户ID是 member_openid
+            user_id = str(getattr(author, 'member_openid', None) or getattr(author, 'user_openid', 'unknown'))
+            content = (data.content or "").strip()
+            if not content:
+                return
+
+            # 获取群组ID - 群聊消息中有 group_openid 属性
+            group_id = str(getattr(data, 'group_openid', 'unknown'))
+            
+            # 打印调试信息
+            logger.info("Received group message:")
+            logger.info("  Group ID: {}", group_id)
+            logger.info("  Sender ID: {}", user_id)
+            logger.info("  Content: {}", content[:100] + "..." if len(content) > 100 else content)
+            
+            await self._handle_message(
+                sender_id=user_id,
+                chat_id=group_id,  # 使用群组ID作为chat_id
+                content=content,
+                metadata={
+                    "message_id": data.id,
+                    "type": "group",
+                    "group_id": group_id,
+                    "sender_id": user_id
+                },
+            )
+        except Exception:
+            logger.exception("Error handling QQ group message")
